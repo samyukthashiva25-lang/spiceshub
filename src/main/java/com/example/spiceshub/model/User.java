@@ -1,5 +1,6 @@
 package com.example.spiceshub.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.google.cloud.firestore.annotation.DocumentId;
 
 import lombok.AllArgsConstructor;
@@ -7,8 +8,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Data
-@NoArgsConstructor
+@NoArgsConstructor  // ✅ CRITICAL: Generates public User() required by Firestore .toObject()
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class User {
     
     @DocumentId
