@@ -1,5 +1,6 @@
 package com.example.spiceshub.controller;
 
+import com.example.spiceshub.model.Login;
 import com.example.spiceshub.model.User;
 import com.example.spiceshub.service.FirebaseService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,24 @@ public class UserController {
 
     @Autowired
     private FirebaseService firebaseService;
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody Login loginRequest) {
+        try {
+            User authenticatedUser = firebaseService.loginWithPhoneAndPassword(
+                loginRequest.getPhonenumber(), 
+                loginRequest.getPassword()
+            );
+            return ResponseEntity.ok(authenticatedUser);
+        } catch (IllegalArgumentException e) {
+            // Returns a 401 for bad credentials or authorization checks
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "An unexpected server processing error occurred."));
+        }
+    }
 
     // POST: Register a new Shop Owner -> returns {"message": "..."}
     @PostMapping("/register")

@@ -176,4 +176,38 @@ public class FirebaseService {
         }
         return userList;
     }
+
+    public User loginWithPhoneAndPassword(String phonenumber, String password) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+
+        // 1. Target query precisely matches the "phonenumber" field key stored in your document models
+        CollectionReference usersCollection = db.collection("users");
+        Query mobileQuery = usersCollection.whereEqualTo("phonenumber", phonenumber != null ? phonenumber.trim() : "");
+        
+        List<QueryDocumentSnapshot> documents = mobileQuery.get().get().getDocuments();
+
+        // 2. Safeguard: Throw unified response message if profile cannot be located
+        if (documents.isEmpty()) {
+            throw new IllegalArgumentException("Invalid phone number or matching password profile configuration.");
+        }
+
+        // 3. Serialize document data straight back down into a Java User profile object
+        User user = documents.get(0).toObject(User.class);
+
+        // 4. Verify password string equality constraints
+        if (!user.getPassword().equals(password)) {
+            throw new IllegalArgumentException("Invalid phone number or matching password profile configuration.");
+        }
+
+        // 5. Enforce Admin verification gates
+        if ("PENDING".equalsIgnoreCase(user.getStatus())) {
+            throw new IllegalArgumentException("Your vendor account registration is currently pending administrator approval.");
+        } else if ("REJECTED".equalsIgnoreCase(user.getStatus())) {
+            throw new IllegalArgumentException("Your account access has been rejected by management.");
+        }
+
+        // Clear sensitive password string parameters out before network transit safely
+        user.setPassword(null);
+        return user;
+    }
 }
