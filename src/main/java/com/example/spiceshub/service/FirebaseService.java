@@ -209,6 +209,9 @@ public User loginWithPhoneAndPassword(String phonenumber, String password) throw
         } else if ("REJECTED".equalsIgnoreCase(currentStatus)) {
             throw new IllegalArgumentException("Your account access has been rejected by management.");
         }
+        else if ("INACTIVE".equalsIgnoreCase(currentStatus)) {
+            throw new IllegalArgumentException("Your account access has been marked as inactive.");
+        }
 
         // 6. Clear sensitive password parameter before returning the object over the network
         matchedUser.setPassword(null);
