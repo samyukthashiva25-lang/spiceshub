@@ -15,7 +15,7 @@ public class CorsConfig {
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**") 
                         .allowedOrigins(
-                            "http://localhost:4200", 
+                            "http://localhost:[*]", 
                             "https://spicehubadmin.netlify.app" // Ensure this matches EXACTLY
                         )
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
