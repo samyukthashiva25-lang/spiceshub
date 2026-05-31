@@ -14,13 +14,14 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**") 
-                        .allowedOrigins(
+                        // ✅ FIX: Changed allowedOrigins to allowedOriginPatterns to process dynamic local ports properly
+                        .allowedOriginPatterns(
                             "http://localhost:[*]", 
-                            "https://spicehubadmin.netlify.app" // Ensure this matches EXACTLY
+                            "https://spicehubadmin.netlify.app"
                         )
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
                         .allowedHeaders("*")
-                        .allowCredentials(true) // Required if sending Auth tokens
+                        .allowCredentials(true) 
                         .maxAge(3600);
             }
         };

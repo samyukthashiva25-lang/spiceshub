@@ -12,8 +12,7 @@ import lombok.NoArgsConstructor;
 public class User {
     
     @DocumentId
-    private String uid;          // Firebase Auth UID
-    
+    private String uid;          // Firebase Auth UID 
     private String shopname;     
     private String ownername;    
     private String phonenumber;  
@@ -25,3 +24,4 @@ public class User {
     private String status;       // "PENDING", "APPROVED", etc.
     private String role;         // "VENDOR" or "ADMIN"
 }
+
