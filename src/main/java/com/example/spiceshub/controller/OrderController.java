@@ -10,7 +10,7 @@ import java.util.concurrent.ExecutionException;
 
 @RestController
 @RequestMapping("/api/orders")
-@CrossOrigin(origins = "*") // Allows Flutter/Angular to talk to it
+//@CrossOrigin(origins = "*") // Allows Flutter/Angular to talk to it
 public class OrderController {
 
     @Autowired

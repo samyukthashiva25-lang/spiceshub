@@ -12,7 +12,7 @@ import java.util.concurrent.ExecutionException;
 
 @RestController
 @RequestMapping("/api/products")
-@CrossOrigin(origins = "*") // Allows Angular dashboard and Flutter mobile app to communicate smoothly
+//@CrossOrigin(origins = "*") // Allows Angular dashboard and Flutter mobile app to communicate smoothly
 public class ProductController {
 
     @Autowired
