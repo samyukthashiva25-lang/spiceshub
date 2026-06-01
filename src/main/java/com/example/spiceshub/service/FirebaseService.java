@@ -9,7 +9,9 @@ import com.google.firebase.cloud.FirestoreClient;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.Date;
 
@@ -84,7 +86,7 @@ public class FirebaseService {
     }
 
     // ==========================================
-    // User-Related Methods (Fixed & Protected)
+    // User-Related Methods
     // ==========================================
 
     public String registerUser(User user) throws ExecutionException, InterruptedException {
@@ -117,12 +119,38 @@ public class FirebaseService {
         return "User approved at " + writeResult.get().getUpdateTime();
     }
 
+    /**
+     * Approves a pending user and sets their initial custom credit limit mapped from the UI slider dialog.
+     */
+    public String approveUserWithLimit(String uid, long customCreditLimit) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+        DocumentReference userDocRef = db.collection("users").document(uid);
 
+        DocumentSnapshot snapshot = userDocRef.get().get();
+        if (!snapshot.exists()) {
+            throw new IllegalArgumentException("User with UID " + uid + " does not exist.");
+        }
 
+        Map<String, Object> updates = new HashMap<>();
+        updates.put("status", "APPROVED");
+        updates.put("creditlimit", customCreditLimit);
 
+        ApiFuture<WriteResult> writeResult = userDocRef.update(updates);
+        return "User " + uid + " successfully approved with a credit limit of " + customCreditLimit + " at " + writeResult.get().getUpdateTime();
+    }
 
+    /**
+     * Toggles an existing user's operational state between ACTIVE and INACTIVE for the table slider switch.
+     */
+    public String toggleUserStatus(String uid, String currentStatus) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+        DocumentReference userDocRef = db.collection("users").document(uid);
 
-    
+        String newStatus = "INACTIVE".equalsIgnoreCase(currentStatus) ? "ACTIVE" : "INACTIVE";
+
+        ApiFuture<WriteResult> writeResult = userDocRef.update("status", newStatus);
+        return "User " + uid + " status toggled to " + newStatus + " at " + writeResult.get().getUpdateTime();
+    }
 
     public User getUserProfile(String uid) throws ExecutionException, InterruptedException {
         Firestore db = FirestoreClient.getFirestore();
@@ -177,7 +205,7 @@ public class FirebaseService {
         return userList;
     }
 
-public User loginWithPhoneAndPassword(String phonenumber, String password) throws ExecutionException, InterruptedException {
+    public User loginWithPhoneAndPassword(String phonenumber, String password) throws ExecutionException, InterruptedException {
         // 1. Fetch all users using your existing service method
         List<User> allUsers = getAllUsers();
 
@@ -208,8 +236,7 @@ public User loginWithPhoneAndPassword(String phonenumber, String password) throw
             throw new IllegalArgumentException("Your vendor account registration is currently pending administrator approval.");
         } else if ("REJECTED".equalsIgnoreCase(currentStatus)) {
             throw new IllegalArgumentException("Your account access has been rejected by management.");
-        }
-        else if ("INACTIVE".equalsIgnoreCase(currentStatus)) {
+        } else if ("INACTIVE".equalsIgnoreCase(currentStatus)) {
             throw new IllegalArgumentException("Your account access has been marked as inactive.");
         }
 
