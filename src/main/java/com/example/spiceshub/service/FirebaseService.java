@@ -3,6 +3,8 @@ package com.example.spiceshub.service;
 import com.example.spiceshub.model.Product;
 import com.example.spiceshub.model.Order;
 import com.example.spiceshub.model.User;
+import com.example.spiceshub.model.Cart;
+import com.example.spiceshub.model.CartItem;
 import com.google.api.core.ApiFuture;
 import com.google.cloud.firestore.*;
 import com.google.firebase.cloud.FirestoreClient;
@@ -12,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.Date;
 
@@ -59,14 +62,77 @@ public class FirebaseService {
     // Order-Related Methods
     // ==========================================
 
-    public String placeOrder(Order order) throws ExecutionException, InterruptedException {
+    /**
+     * Dedicated Order Placement & Account Settlement Processing Workflow
+     */
+   /**
+     * Dedicated Order Placement & Account Settlement Processing Workflow
+     */
+    public Map<String, Object> checkoutAndPlaceOrder(String uid, String shippingAddress, String paymentMethod) throws Exception {
         Firestore db = FirestoreClient.getFirestore();
-        order.setOrderDate(new Date());
-        order.setStatus("PENDING");
+        
+        // 1. Fetch current cart details
+        Cart cart = getOrCreateCart(uid);
+        if (cart.getItems() == null || cart.getItems().isEmpty()) {
+            throw new IllegalStateException("Cannot place an order with an empty cart.");
+        }
+        
+        long totalAmount = cart.getTotalprice();
+        DocumentReference userRef = db.collection("users").document(uid);
+        
+        // 2. Handle Credit Limit Logic Validation and Deduction if chosen
+        if ("CREDIT_LIMIT".equalsIgnoreCase(paymentMethod)) {
+            DocumentSnapshot userSnap = userRef.get().get();
+            if (!userSnap.exists()) {
+                throw new IllegalArgumentException("User profile not found.");
+            }
+            
+            long currentLimit = userSnap.contains("creditlimit") ? userSnap.getLong("creditlimit") : 0L;
+            
+            if (currentLimit < totalAmount) {
+                throw new IllegalStateException("Insufficient credit limit. Available: ₹" + currentLimit + ", Required: ₹" + totalAmount);
+            }
+            
+            // Deduct the order total directly from the user's available credit balance
+            long updatedLimit = currentLimit - totalAmount;
+            userRef.update("creditlimit", updatedLimit).get();
+        }
+        
+        // 3. Assemble order properties dynamically as a Map to avoid Order.java setter compilation issues
+        String uniqueOrderId = "ORD_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        Map<String, Object> orderDocument = new HashMap<>();
+        
+        orderDocument.put("orderId", uniqueOrderId);
+        orderDocument.put("userId", uid);
+        orderDocument.put("items", new ArrayList<>(cart.getItems()));
+        orderDocument.put("totalAmount", totalAmount);
+        orderDocument.put("status", "PLACED");
+        orderDocument.put("paymentMethod", paymentMethod.toUpperCase());
+        orderDocument.put("timestamp", new Date().toString());
+        orderDocument.put("shippingAddress", shippingAddress);
+        
+        // 4. Save the compiled Map document directly to Firestore
+        db.collection("orders").document(uniqueOrderId).set(orderDocument).get();
+        
+        // 5. Purge/Clear current cart tracking list elements layout safely
+        clearCart(uid);
+        
+        return orderDocument;
+    }
 
-        ApiFuture<DocumentReference> docRef = db.collection("orders").add(order);
+    /**
+     * Legacy Order Placement 
+     */
+    public String placeOrder(Map<String, Object> orderPayload) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+        orderPayload.put("timestamp", new Date().toString());
+        orderPayload.put("status", "PENDING");
+
+        ApiFuture<DocumentReference> docRef = db.collection("orders").add(orderPayload);
         return docRef.get().getId();
     }
+
+    
 
     public List<Order> getAllOrders() throws ExecutionException, InterruptedException {
         Firestore db = FirestoreClient.getFirestore();
@@ -86,29 +152,151 @@ public class FirebaseService {
     }
 
     // ==========================================
+    // Cart-Related Methods
+    // ==========================================
+
+    /**
+     * Fetches a vendor's cart document by their UID. Creates a new initialized empty cart 
+     * if the document doesn't exist yet.
+     */
+    public Cart getOrCreateCart(String uid) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+        DocumentReference docRef = db.collection("carts").document(uid);
+        DocumentSnapshot document = docRef.get().get();
+
+        if (document.exists()) {
+            return document.toObject(Cart.class);
+        } else {
+            Cart newCart = new Cart(uid, new ArrayList<>(), 0L, new Date().getTime());
+            docRef.set(newCart).get();
+            return newCart;
+        }
+    }
+
+
+    public void updateOrderStatus(String orderId, String status) throws Exception {
+
+    Firestore db = FirestoreClient.getFirestore();
+
+    ApiFuture<QuerySnapshot> future =
+            db.collection("orders")
+              .whereEqualTo("orderId", orderId)
+              .get();
+
+    List<QueryDocumentSnapshot> documents = future.get().getDocuments();
+
+    if (documents.isEmpty()) {
+        throw new IllegalArgumentException("Order not found");
+    }
+
+    DocumentReference docRef = documents.get(0).getReference();
+
+    docRef.update("status", status).get();
+}
+
+    /**
+     * Adds an item to a user's cart. Merges quantities and recalculates subtotals if 
+     * matching variant attributes exist.
+     */
+    public Cart addItemToCart(String uid, CartItem newItem) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+        Cart cart = getOrCreateCart(uid);
+
+        boolean itemExists = false;
+        for (CartItem item : cart.getItems()) {
+            if (item.getProductid().equals(newItem.getProductid()) && 
+                item.getSelectedweight().equalsIgnoreCase(newItem.getSelectedweight())) {
+                
+                item.setQuantity(item.getQuantity() + newItem.getQuantity());
+                item.setSubtotal(item.getQuantity() * item.getPriceperunit());
+                itemExists = true;
+                break;
+            }
+        }
+
+        if (!itemExists) {
+            newItem.setSubtotal(newItem.getQuantity() * newItem.getPriceperunit());
+            cart.getItems().add(newItem);
+        }
+
+        recalculateCartTotals(cart);
+        db.collection("carts").document(uid).set(cart).get();
+        return cart;
+    }
+
+    /**
+     * Updates an explicit variant item count line. Removes the array item entirely 
+     * if the quantity is adjusted below or equal to zero.
+     */
+    public Cart updateCartItemQuantity(String uid, String productId, String weight, long quantity) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+        Cart cart = getOrCreateCart(uid);
+
+        if (cart.getUid() == null || cart.getUid().trim().isEmpty()) {
+            cart.setUid(uid);
+        }
+
+        if (quantity <= 0) {
+            cart.getItems().removeIf(item -> item.getProductid().equals(productId) && 
+                                             item.getSelectedweight().equalsIgnoreCase(weight));
+        } else {
+            for (CartItem item : cart.getItems()) {
+                if (item.getProductid().equals(productId) && item.getSelectedweight().equalsIgnoreCase(weight)) {
+                    item.setQuantity(quantity);
+                    item.setSubtotal(quantity * item.getPriceperunit());
+                    break;
+                }
+            }
+        }
+
+        recalculateCartTotals(cart);
+        db.collection("carts").document(uid).set(cart).get();
+        return cart;
+    }
+
+    /**
+     * Purges all elements out of an active tracking document card and resets the global value parameters.
+     */
+    public Cart clearCart(String uid) throws ExecutionException, InterruptedException {
+        Firestore db = FirestoreClient.getFirestore();
+        Cart cart = getOrCreateCart(uid);
+        
+        cart.getItems().clear();
+        cart.setTotalprice(0L);
+        cart.setUpdatedat(new Date().getTime());
+        
+        db.collection("carts").document(uid).set(cart).get();
+        return cart;
+    }
+
+    private void recalculateCartTotals(Cart cart) {
+        long grandTotal = 0;
+        for (CartItem item : cart.getItems()) {
+            grandTotal += item.getSubtotal();
+        }
+        cart.setTotalprice(grandTotal);
+        cart.setUpdatedat(new Date().getTime());
+    }
+
+    // ==========================================
     // User-Related Methods
     // ==========================================
 
     public String registerUser(User user) throws ExecutionException, InterruptedException {
         Firestore db = FirestoreClient.getFirestore();
 
-        // Check if the UID is null, empty string "", or just spaces
         if (user.getUid() == null || user.getUid().trim().isEmpty()) {
-            // Automatically generate a random, unique Firestore document ID
             String generatedUid = db.collection("users").document().getId();
             user.setUid(generatedUid);
         }
 
-        // Set your backend business defaults
         user.setRole("VENDOR");
         user.setStatus("PENDING");
 
-        // Type-safe check for your long creditlimit property
         if (user.getCreditlimit() <= 0) {
             user.setCreditlimit(0);
         }
 
-        // Now user.getUid() is guaranteed to be a valid, non-empty path string
         db.collection("users").document(user.getUid()).set(user);
         return "Registration successful with ID: " + user.getUid();
     }
@@ -119,9 +307,6 @@ public class FirebaseService {
         return "User approved at " + writeResult.get().getUpdateTime();
     }
 
-    /**
-     * Approves a pending user and sets their initial custom credit limit mapped from the UI slider dialog.
-     */
     public String approveUserWithLimit(String uid, long customCreditLimit) throws ExecutionException, InterruptedException {
         Firestore db = FirestoreClient.getFirestore();
         DocumentReference userDocRef = db.collection("users").document(uid);
@@ -139,9 +324,6 @@ public class FirebaseService {
         return "User " + uid + " successfully approved with a credit limit of " + customCreditLimit + " at " + writeResult.get().getUpdateTime();
     }
 
-    /**
-     * Toggles an existing user's operational state between ACTIVE and INACTIVE for the table slider switch.
-     */
     public String toggleUserStatus(String uid, String currentStatus) throws ExecutionException, InterruptedException {
         Firestore db = FirestoreClient.getFirestore();
         DocumentReference userDocRef = db.collection("users").document(uid);
@@ -206,31 +388,26 @@ public class FirebaseService {
     }
 
     public User loginWithPhoneAndPassword(String phonenumber, String password) throws ExecutionException, InterruptedException {
-        // 1. Fetch all users using your existing service method
         List<User> allUsers = getAllUsers();
 
         if (allUsers == null || allUsers.isEmpty()) {
             throw new IllegalArgumentException("Invalid phone number or matching password profile configuration.");
         }
 
-        // 2. Find the user with the matching phone number
         final String searchPhone = phonenumber != null ? phonenumber.trim() : "";
         User matchedUser = allUsers.stream()
                 .filter(u -> u.getPhonenumber() != null && u.getPhonenumber().trim().equals(searchPhone))
                 .findFirst()
                 .orElse(null);
 
-        // 3. Safeguard: Throw error if no profile matches that phone number
         if (matchedUser == null) {
             throw new IllegalArgumentException("Invalid phone number or matching password profile configuration.");
         }
 
-        // 4. Verify password accuracy safely
         if (matchedUser.getPassword() == null || !matchedUser.getPassword().equals(password)) {
             throw new IllegalArgumentException("Invalid phone number or matching password profile configuration.");
         }
 
-        // 5. Enforce Admin verification gates
         String currentStatus = matchedUser.getStatus() != null ? matchedUser.getStatus() : "PENDING";
         if ("PENDING".equalsIgnoreCase(currentStatus)) {
             throw new IllegalArgumentException("Your vendor account registration is currently pending administrator approval.");
@@ -240,7 +417,6 @@ public class FirebaseService {
             throw new IllegalArgumentException("Your account access has been marked as inactive.");
         }
 
-        // 6. Clear sensitive password parameter before returning the object over the network
         matchedUser.setPassword(null);
         return matchedUser;
     }

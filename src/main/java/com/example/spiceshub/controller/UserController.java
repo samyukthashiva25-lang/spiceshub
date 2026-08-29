@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
 @RestController
@@ -23,13 +24,26 @@ public class UserController {
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Login loginRequest) {
         try {
-            User authenticatedUser = firebaseService.loginWithPhoneAndPassword(
-                loginRequest.getPhonenumber(), 
-                loginRequest.getPassword()
-            );
-            return ResponseEntity.ok(authenticatedUser);
+            // 1. Fetch all users from the service
+            List<User> allUsers = firebaseService.getAllUsers();
+
+            // 2. Stream through users to find a matching phone number and password
+            Optional<User> matchedUser = allUsers.stream()
+                    .filter(user -> user.getPhonenumber() != null && 
+                                    user.getPhonenumber().equals(loginRequest.getPhonenumber()))
+                    .filter(user -> user.getPassword() != null && 
+                                    user.getPassword().equals(loginRequest.getPassword()))
+                    .findFirst();
+
+            // 3. Evaluate the result
+            if (matchedUser.isPresent()) {
+                return ResponseEntity.ok(matchedUser.get());
+            } else {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Invalid phone number or password."));
+            }
+
         } catch (IllegalArgumentException e) {
-            // Returns a 401 for bad credentials or authorization checks
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
